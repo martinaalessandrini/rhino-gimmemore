@@ -1,20 +1,16 @@
-from dataclasses import dataclass, field
-from typing import Optional
-
-
-@dataclass
-class ModelEntry:
+class ModelEntry(object):
     """Represents a single 3D model in the library."""
-    file_path: str
-    category: str
-    sub_category: str
-    brand: str
-    model_name: str
-    format: str
-    thumbnail_path: Optional[str] = None
+
+    def __init__(self, file_path, category, sub_category, brand, model_name, format, thumbnail_path=None):
+        self.file_path = file_path
+        self.category = category
+        self.sub_category = sub_category
+        self.brand = brand
+        self.model_name = model_name
+        self.format = format
+        self.thumbnail_path = thumbnail_path
 
     def to_binding_dict(self):
-        """Returns a dictionary for Eto.Forms GridView data binding."""
         return {
             "ModelName": self.model_name,
             "Brand": self.brand,

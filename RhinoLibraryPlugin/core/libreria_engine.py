@@ -1,55 +1,78 @@
 import json
+import os
 from datetime import datetime
-from pathlib import Path
-from typing import List, Optional
 
-from .model_entry import ModelEntry
-from .library_index import LibraryIndex
+from core.model_entry import ModelEntry
+from core.library_index import LibraryIndex
 
 
-class LibreriaEngine:
+def _open_text(path, mode):
+    try:
+        return open(path, mode, encoding="utf-8")
+    except TypeError:
+        import codecs
+        enc = "utf-8-sig" if "r" in mode else "utf-8"
+        return codecs.open(path, mode, enc)
+
+
+def _parse_iso(value):
+    if not value:
+        return datetime.utcnow()
+    if value.endswith("Z"):
+        value = value[:-1]
+    for fmt in ("%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return datetime.strptime(value, fmt)
+        except ValueError:
+            continue
+    return datetime.utcnow()
+
+
+class LibreriaEngine(object):
     """Handles folder scanning, index persistence, and metadata extraction."""
 
-    SUPPORTED_FORMATS = {".obj", ".3ds", ".3dm"}
+    SUPPORTED_FORMATS = set([".obj", ".3ds", ".3dm"])
     INDEX_FILENAME = "library.json"
 
-    def scan_library(self, root_path: str) -> List[ModelEntry]:
-        """Scans the library folder structure and returns a list of ModelEntry."""
+    def scan_library(self, root_path):
         entries = []
-        root = Path(root_path)
-        if not root.exists():
+        if not os.path.isdir(root_path):
             return entries
 
-        for category_dir in [d for d in root.iterdir() if d.is_dir()]:
-            category = category_dir.name
-            for sub_category_dir in [d for d in category_dir.iterdir() if d.is_dir()]:
-                sub_category = sub_category_dir.name
-                for brand_dir in [d for d in sub_category_dir.iterdir() if d.is_dir()]:
-                    brand = brand_dir.name
-                    for file_path in brand_dir.iterdir():
-                        if not file_path.is_file():
+        for category in os.listdir(root_path):
+            category_dir = os.path.join(root_path, category)
+            if not os.path.isdir(category_dir):
+                continue
+            for sub_category in os.listdir(category_dir):
+                sub_dir = os.path.join(category_dir, sub_category)
+                if not os.path.isdir(sub_dir):
+                    continue
+                for brand in os.listdir(sub_dir):
+                    brand_dir = os.path.join(sub_dir, brand)
+                    if not os.path.isdir(brand_dir):
+                        continue
+                    for name in os.listdir(brand_dir):
+                        file_path = os.path.join(brand_dir, name)
+                        if not os.path.isfile(file_path):
                             continue
-                        ext = file_path.suffix.lower()
+                        ext = os.path.splitext(name)[1].lower()
                         if ext not in self.SUPPORTED_FORMATS:
                             continue
-
-                        model_name = file_path.stem
-                        thumb_path = brand_dir / f"{model_name}.thumb.png"
-
+                        model_name = os.path.splitext(name)[0]
+                        thumb_path = os.path.join(brand_dir, model_name + ".thumb.png")
                         entries.append(ModelEntry(
-                            file_path=str(file_path),
+                            file_path=file_path,
                             category=category,
                             sub_category=sub_category,
                             brand=brand,
                             model_name=model_name,
                             format=ext,
-                            thumbnail_path=str(thumb_path) if thumb_path.exists() else None
+                            thumbnail_path=thumb_path if os.path.exists(thumb_path) else None
                         ))
         return entries
 
-    def save_index(self, root_path: str, index: LibraryIndex) -> None:
-        """Saves the index to library.json in the root folder."""
-        index_path = Path(root_path) / self.INDEX_FILENAME
+    def save_index(self, root_path, index):
+        index_path = os.path.join(root_path, self.INDEX_FILENAME)
         data = {
             "lastScanned": index.last_scanned.isoformat() + "Z",
             "entries": [
@@ -65,19 +88,25 @@ class LibreriaEngine:
                 for e in index.entries
             ]
         }
-        with open(index_path, "w", encoding="utf-8") as f:
+        f = _open_text(index_path, "w")
+        try:
             json.dump(data, f, indent=2, ensure_ascii=False)
+        finally:
+            f.close()
 
-    def load_index(self, root_path: str) -> Optional[LibraryIndex]:
-        """Loads the index from library.json. Returns None if not found or corrupted."""
-        index_path = Path(root_path) / self.INDEX_FILENAME
-        if not index_path.exists():
+    def load_index(self, root_path):
+        index_path = os.path.join(root_path, self.INDEX_FILENAME)
+        if not os.path.exists(index_path):
             return None
         try:
-            with open(index_path, "r", encoding="utf-8") as f:
+            f = _open_text(index_path, "r")
+            try:
                 data = json.load(f)
-            entries = [
-                ModelEntry(
+            finally:
+                f.close()
+            entries = []
+            for e in data.get("entries", []):
+                entries.append(ModelEntry(
                     file_path=e["filePath"],
                     category=e["category"],
                     sub_category=e["subCategory"],
@@ -85,39 +114,35 @@ class LibreriaEngine:
                     model_name=e["modelName"],
                     format=e["format"],
                     thumbnail_path=e.get("thumbnailPath")
-                )
-                for e in data.get("entries", [])
-            ]
-            last_scanned_str = data.get("lastScanned", "")
-            if last_scanned_str.endswith("Z"):
-                last_scanned_str = last_scanned_str[:-1]
-            last_scanned = datetime.fromisoformat(last_scanned_str) if last_scanned_str else datetime.utcnow()
+                ))
+            last_scanned = _parse_iso(data.get("lastScanned", ""))
             return LibraryIndex(last_scanned=last_scanned, entries=entries)
         except Exception:
             return None
 
-    def is_index_stale(self, root_path: str, last_scanned: datetime) -> bool:
-        """Returns True if any file in the library was modified after last_scanned."""
-        root = Path(root_path)
-        if not root.exists():
+    def is_index_stale(self, root_path, last_scanned):
+        if not os.path.isdir(root_path):
             return True
-
         max_write_time = datetime.min
-        for file in root.rglob("*"):
-            if file.is_file():
-                mtime = datetime.utcfromtimestamp(file.stat().st_mtime)
+        for dirpath, dirnames, filenames in os.walk(root_path):
+            for name in filenames:
+                path = os.path.join(dirpath, name)
+                try:
+                    mtime = datetime.utcfromtimestamp(os.path.getmtime(path))
+                except Exception:
+                    continue
                 if mtime > max_write_time:
                     max_write_time = mtime
         return max_write_time > last_scanned
 
-    def get_categories(self, entries: List[ModelEntry]) -> List[str]:
-        """Returns sorted list of unique categories."""
-        return sorted({e.category for e in entries})
+    def get_categories(self, entries):
+        return sorted(set([e.category for e in entries]))
 
-    def get_sub_categories(self, entries: List[ModelEntry], category: str) -> List[str]:
-        """Returns sorted list of unique sub-categories for a given category."""
-        return sorted({e.sub_category for e in entries if e.category == category})
+    def get_sub_categories(self, entries, category):
+        return sorted(set([e.sub_category for e in entries if e.category == category]))
 
-    def get_brands(self, entries: List[ModelEntry], category: str, sub_category: str) -> List[str]:
-        """Returns sorted list of unique brands for a given category and sub-category."""
-        return sorted({e.brand for e in entries if e.category == category and e.sub_category == sub_category})
+    def get_brands(self, entries, category, sub_category):
+        return sorted(set([
+            e.brand for e in entries
+            if e.category == category and e.sub_category == sub_category
+        ]))

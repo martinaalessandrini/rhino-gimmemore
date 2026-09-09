@@ -1,11 +1,9 @@
-from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List
-from .model_entry import ModelEntry
 
 
-@dataclass
-class LibraryIndex:
+class LibraryIndex(object):
     """Represents the serialized index of the library."""
-    last_scanned: datetime = field(default_factory=datetime.utcnow)
-    entries: List[ModelEntry] = field(default_factory=list)
+
+    def __init__(self, last_scanned=None, entries=None):
+        self.last_scanned = last_scanned if last_scanned is not None else datetime.utcnow()
+        self.entries = entries if entries is not None else []

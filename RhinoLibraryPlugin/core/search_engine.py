@@ -1,35 +1,32 @@
 import re
-from typing import List
 
-from .model_entry import ModelEntry
+from core.model_entry import ModelEntry
 
 
-class SearchEngine:
+class SearchEngine(object):
     """Handles query normalization and token-based keyword search."""
 
-    def normalize_query(self, query: str) -> List[str]:
-        """Normalizes a query string into lowercase tokens, removing hyphens and underscores."""
-        if not query or not query.strip():
+    def normalize_query(self, query):
+        query = "" if query is None else str(query)
+        if not query.strip():
             return []
         normalized = query.lower()
         normalized = re.sub(r"[-_]", " ", normalized)
         normalized = re.sub(r"\s+", " ", normalized).strip()
         return [token for token in normalized.split(" ") if token]
 
-    def search(self, query: str, entries: List[ModelEntry]) -> List[ModelEntry]:
-        """Filters entries by query. All tokens must be present in at least one field (AND on tokens, OR on fields)."""
+    def search(self, query, entries):
         tokens = self.normalize_query(query)
         if not tokens:
             return list(entries)
 
         results = []
         for entry in entries:
-            searchable = f"{entry.category} {entry.sub_category} {entry.brand} {entry.model_name}".lower()
+            searchable = (entry.category + " " + entry.sub_category + " " + entry.brand + " " + entry.model_name).lower()
             if all(token in searchable for token in tokens):
                 results.append(entry)
 
-        # Sort by relevance: model_name matches first, then brand
-        def score(entry: ModelEntry) -> int:
+        def score(entry):
             model_name_lower = entry.model_name.lower()
             brand_lower = entry.brand.lower()
             s = 0
