@@ -14,6 +14,16 @@ from services.thumbnail_manager import ThumbnailManager
 from services.import_manager import ImportManager
 from settings.plugin_settings import PluginSettings
 from core.result_row import ellipsize_label, result_row_fields
+from core.column_layout import (
+    COLUMN_COUNT,
+    apply_weights,
+    drag_adjacent_columns,
+    equal_column_widths,
+    inner_width,
+    reset_column_to_standard,
+    session_get,
+    session_put,
+)
 
 FORMAT_LABELS = {
     ".3dm": "3DM",
@@ -55,9 +65,15 @@ class LibraryPanel(forms.Panel):
         self.filtered_entries = []
         self._updating_filters = False
         self._syncing_columns = False
+        self._user_resizing = False
+        self._drag_col = None
+        self._drag_screen_x = 0
+        self._drag_widths = None
         self._header_labels = []
         self._filter_dropdowns = []
         self._col_pixel_width = 120
+        self._applied_widths = None
+        self._column_weights = session_get(self._session_key())
 
         self.build_layout()
         self.load_library()
@@ -108,6 +124,10 @@ class LibraryPanel(forms.Panel):
                 lab.Wrap = forms.WrapMode.None
             except Exception:
                 pass
+            try:
+                lab.AutoSize = False
+            except Exception:
+                pass
             self._header_labels.append(lab)
 
         columns_table = forms.TableLayout()
@@ -116,7 +136,7 @@ class LibraryPanel(forms.Panel):
 
         def equal_cell(control):
             cell = forms.TableCell(control)
-            cell.ScaleWidth = True
+            cell.ScaleWidth = False
             return cell
 
         def gutter_cell():
@@ -162,6 +182,18 @@ class LibraryPanel(forms.Panel):
                 pass
             self.results_grid.Columns.Add(col)
 
+        for i, lab in enumerate(self._header_labels):
+            lab.MouseDoubleClick += self._make_header_reset_handler(i)
+            lab.MouseDown += self._make_header_down_handler(i)
+            lab.MouseMove += self._make_header_move_handler(i)
+            lab.MouseUp += self._on_drag_mouse_up
+        self.MouseMove += self._on_drag_mouse_move
+        self.MouseUp += self._on_drag_mouse_up
+        try:
+            self.results_grid.MouseUp += self._on_grid_mouse_up
+        except Exception:
+            pass
+
         self.SizeChanged += self._sync_columns
 
         self.import_button = forms.Button()
@@ -200,18 +232,209 @@ class LibraryPanel(forms.Panel):
 
         self.Content = main_layout
 
+    def _session_key(self):
+        if getattr(self, "pose_mode", False):
+            return "gimmemore"
+        return "libreria"
+
+    def _make_header_reset_handler(self, index):
+        def handler(sender, e):
+            self._reset_column_from_header(index)
+        return handler
+
+    def _make_header_down_handler(self, index):
+        def handler(sender, e):
+            self._on_header_mouse_down(index, sender, e)
+        return handler
+
+    def _make_header_move_handler(self, index):
+        def handler(sender, e):
+            if self._user_resizing:
+                self._on_drag_mouse_move(sender, e)
+                return
+            edge = self._near_column_edge(sender, e)
+            try:
+                if edge:
+                    sender.Cursor = forms.Cursors.VerticalSplit
+                else:
+                    sender.Cursor = forms.Cursors.Default
+            except Exception:
+                pass
+        return handler
+
+    def _mouse_screen_x(self, sender, e):
+        try:
+            return int(forms.Mouse.Position.X)
+        except Exception:
+            pass
+        try:
+            loc = e.Location
+            pt = sender.PointToScreen(drawing.Point(int(loc.X), int(loc.Y)))
+            return int(pt.X)
+        except Exception:
+            pass
+        try:
+            return int(e.ScreenLocation.X)
+        except Exception:
+            return None
+
+    def _on_header_mouse_down(self, index, sender, e):
+        edge = self._near_column_edge(sender, e)
+        if not edge:
+            return
+        if edge == "left" and index <= 0:
+            return
+        screen_x = self._mouse_screen_x(sender, e)
+        if screen_x is None:
+            return
+        self._drag_col = index - 1 if edge == "left" else index
+        self._user_resizing = True
+        self._drag_screen_x = screen_x
+        inner = inner_width(self.results_grid.Width)
+        self._drag_widths = list(
+            self._applied_widths or equal_column_widths(inner)
+        )
+        try:
+            self.Capture = True
+        except Exception:
+            try:
+                forms.Mouse.Capture = self
+            except Exception:
+                pass
+
+    def _on_drag_mouse_move(self, sender, e):
+        if not self._user_resizing or self._drag_col is None or self._drag_widths is None:
+            return
+        screen_x = self._mouse_screen_x(sender, e)
+        if screen_x is None:
+            return
+        delta = screen_x - self._drag_screen_x
+        new = drag_adjacent_columns(self._drag_widths, self._drag_col, delta)
+        if new == getattr(self, "_applied_widths", None):
+            return
+        self._apply_column_pixels(new, update_grid=False)
+
+    def _on_drag_mouse_up(self, sender, e):
+        if self._user_resizing and self._drag_col is not None:
+            if self._applied_widths:
+                self._column_weights = list(self._applied_widths)
+                session_put(self._session_key(), self._column_weights)
+                self._apply_column_pixels(self._applied_widths, update_grid=True)
+            self._fill_grid_rows()
+        self._user_resizing = False
+        self._drag_col = None
+        self._drag_widths = None
+        try:
+            self.Capture = False
+        except Exception:
+            try:
+                forms.Mouse.Capture = None
+            except Exception:
+                pass
+
+    def _near_column_edge(self, sender, e):
+        try:
+            x = int(e.Location.X)
+            w = int(sender.Width or 0)
+        except Exception:
+            return None
+        if w <= 0:
+            return None
+        if x >= w - 10:
+            return "right"
+        if x <= 10:
+            return "left"
+        return None
+
+    def _reset_column_from_header(self, index):
+        grid = getattr(self, "results_grid", None)
+        if grid is None:
+            return
+        inner = inner_width(grid.Width)
+        current = self._column_weights or equal_column_widths(inner)
+        widths = reset_column_to_standard(current, index, inner)
+        self._column_weights = widths
+        session_put(self._session_key(), widths)
+        self._apply_column_pixels(widths)
+        self._fill_grid_rows()
+
+    def _on_grid_mouse_up(self, sender, e):
+        self._capture_user_column_widths()
+
+    def _capture_user_column_widths(self):
+        grid = getattr(self, "results_grid", None)
+        if grid is None or self._syncing_columns:
+            return
+        pixels = []
+        try:
+            for i in range(COLUMN_COUNT):
+                pixels.append(int(grid.Columns[i].Width or 0))
+        except Exception:
+            return
+        if len(pixels) < COLUMN_COUNT or min(pixels) <= 0:
+            return
+        inner = inner_width(grid.Width)
+        expected = (
+            apply_weights(self._column_weights, inner)
+            if self._column_weights
+            else equal_column_widths(inner)
+        )
+        if pixels == expected:
+            return
+        self._column_weights = pixels
+        session_put(self._session_key(), pixels)
+        self._apply_column_pixels(pixels)
+        self._fill_grid_rows()
+
+    def _apply_column_pixels(self, widths, update_grid=True):
+        self._applied_widths = list(widths)
+        if widths:
+            self._col_pixel_width = min(widths)
+        grid = getattr(self, "results_grid", None)
+        if grid is None:
+            return
+        was_syncing = self._syncing_columns
+        self._syncing_columns = True
+        try:
+            for i, w in enumerate(widths):
+                if i < len(self._header_labels):
+                    try:
+                        self._header_labels[i].Width = w
+                    except Exception:
+                        pass
+                if i < len(self._filter_dropdowns):
+                    try:
+                        self._filter_dropdowns[i].Width = w
+                    except Exception:
+                        pass
+                if update_grid:
+                    try:
+                        col = grid.Columns[i]
+                        col.Expand = False
+                        col.Width = w
+                    except Exception:
+                        pass
+        finally:
+            self._syncing_columns = was_syncing
+
     def _fill_grid_rows(self):
-        width = getattr(self, "_col_pixel_width", 120)
+        widths = getattr(self, "_applied_widths", None)
+        if not widths:
+            widths = [getattr(self, "_col_pixel_width", 120)] * COLUMN_COUNT
         rows = []
         for entry in self.filtered_entries:
             fields = result_row_fields(
                 entry.category, entry.sub_category, entry.brand, entry.model_name, entry.format
             )
-            rows.append(tuple(ellipsize_label(part, width) for part in fields))
+            cells = []
+            for i, part in enumerate(fields):
+                col_w = widths[i] if i < len(widths) else widths[-1]
+                cells.append(ellipsize_label(part, col_w))
+            rows.append(tuple(cells))
         self.results_grid.DataStore = rows
 
     def _sync_columns(self, sender=None, e=None):
-        if self._syncing_columns:
+        if self._syncing_columns or getattr(self, "_user_resizing", False):
             return
         grid = getattr(self, "results_grid", None)
         if grid is None:
@@ -223,27 +446,18 @@ class LibraryPanel(forms.Panel):
                 n = len(list(grid.Columns))
             except Exception:
                 n = 0
-        if n < 5:
+        if n < COLUMN_COUNT:
             return
         self._syncing_columns = True
         try:
             total = int(grid.Width or 0)
-            count = 5
             if total > 80:
-                gutter = 20
-                inner = total - gutter
-                if inner < count * 48:
-                    inner = count * 48
-                col_w = int(inner / count)
-                leftover = inner - (col_w * count)
-                for i in range(count):
-                    w = col_w
-                    if i == count - 1:
-                        w += leftover
-                    col = grid.Columns[i]
-                    col.Expand = False
-                    col.Width = w
-                self._col_pixel_width = col_w
+                inner = inner_width(total)
+                if self._column_weights:
+                    widths = apply_weights(self._column_weights, inner)
+                else:
+                    widths = equal_column_widths(inner)
+                self._apply_column_pixels(widths)
             self._fill_grid_rows()
         finally:
             self._syncing_columns = False
