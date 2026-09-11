@@ -140,7 +140,7 @@ class LibraryPanel(forms.Panel):
         columns_table.Rows.Add(filter_row)
 
         self.results_grid = forms.GridView()
-        self.results_grid.ShowHeader = True
+        self.results_grid.ShowHeader = False
         self.results_grid.AllowMultipleSelection = False
         self.results_grid.SelectionChanged += self.on_selection_changed
         self.results_grid.SizeChanged += self._sync_columns
