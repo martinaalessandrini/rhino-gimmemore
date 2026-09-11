@@ -50,8 +50,60 @@ class LibreriaEngineTests(unittest.TestCase):
         self.assertTrue(self.engine.is_index_stale(self.test_dir, old_time))
 
     def test_is_index_stale_returns_false_for_fresh_index(self):
-        now = datetime.utcnow()
-        self.assertFalse(self.engine.is_index_stale(self.test_dir, now))
+        later = datetime.utcnow() + timedelta(seconds=5)
+        self.assertFalse(self.engine.is_index_stale(self.test_dir, later))
+
+    def test_scan_finds_models_nested_inside_brand_folders(self):
+        lago = Path(self.test_dir) / "Arredi" / "Letti" / "LAGO" / "LAGO Fluttua 180x200"
+        lago.mkdir(parents=True)
+        (lago / "LAGO_WEB_FLUVU.obj").write_text("dummy")
+        pianca = (
+            Path(self.test_dir) / "Arredi" / "Letti" / "Pianca" /
+            "Pianca - Bricola" / "19_BRICOLA" / "01_LETTI" / "OBJ"
+        )
+        pianca.mkdir(parents=True)
+        (pianca / "WBCB13C.obj").write_text("dummy")
+        macosx = Path(self.test_dir) / "Arredi" / "Letti" / "Twils" / "opera" / "__MACOSX"
+        macosx.mkdir(parents=True)
+        (macosx / "._Opera.obj").write_text("junk")
+
+        entries = self.engine.scan_library(self.test_dir)
+        brands = sorted(set([e.brand for e in entries]))
+        names = sorted([e.model_name for e in entries])
+
+        self.assertIn("LAGO", brands)
+        self.assertIn("Pianca", brands)
+        self.assertIn("LAGO_WEB_FLUVU", names)
+        self.assertIn("WBCB13C", names)
+        self.assertNotIn("._Opera", names)
+
+    def test_scan_keeps_all_supported_formats_for_same_model(self):
+        brand = Path(self.test_dir) / "Arredi" / "Letti" / "Twils" / "Opera"
+        brand.mkdir(parents=True)
+        (brand / "Opera.obj").write_text("dummy")
+        (brand / "Opera.3ds").write_text("dummy")
+        (brand / "Opera.3dm").write_text("dummy")
+        (brand / "Opera.dwg").write_text("dummy")
+        (brand / "Opera.max").write_text("ignored")
+
+        entries = [e for e in self.engine.scan_library(self.test_dir) if e.brand == "Twils"]
+        formats = sorted([e.format for e in entries])
+        self.assertEqual(formats, [".3dm", ".3ds", ".dwg", ".obj"])
+
+    def test_get_formats_filters_by_brand(self):
+        brand = Path(self.test_dir) / "Arredi" / "Letti" / "Twils" / "Opera"
+        brand.mkdir(parents=True)
+        (brand / "Opera.obj").write_text("dummy")
+        (brand / "Opera.dwg").write_text("dummy")
+        entries = self.engine.scan_library(self.test_dir)
+        self.assertEqual(
+            self.engine.get_formats(entries, "Arredi", "Letti", "Twils"),
+            [".obj", ".dwg"],
+        )
+        self.assertEqual(
+            self.engine.get_formats(entries, "Arredi", "Letti", "Poliform"),
+            [".obj"],
+        )
 
 
 if __name__ == '__main__':

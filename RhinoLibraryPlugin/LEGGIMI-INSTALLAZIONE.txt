@@ -1,0 +1,23 @@
+Libreria Interni per Rhino 7 e Rhino 8
+======================================
+
+Lo stesso zip va bene su entrambi. Non servono due pacchetti.
+
+1. Chiudi Rhino (sia 7 sia 8, se li hai aperti).
+2. Fai doppio clic su Installa.bat.
+3. Apri Rhino 7 oppure Rhino 8.
+4. Nella riga di comando scrivi: LibreriaInterni
+   (resta com'era: importa il file cosi' com'e')
+   Oppure: GimmeMore
+   (stessa libreria, ma dopo Importa clicchi dove metterlo)
+5. Premi Invio.
+6. Clicca "Scegli cartella" e indica i modelli 3D.
+   In GimmeMore, la prima volta la lista e' vuota finche' non scegli la cartella.
+
+Se il comando non compare, in Rhino vai su Opzioni > Alias > Importa
+e scegli il file LibreriaInterni-alias.txt (nella cartella di installazione).
+
+Per togliere il plugin: chiudi Rhino e fai doppio clic su Disinstalla.bat.
+
+I file 3D della libreria non sono dentro questo pacchetto.
+Ogni computer puo' puntare alla propria cartella (o a un disco di rete).

@@ -7,21 +7,27 @@ Plugin per Rhino 7/8 per navigare, cercare e importare oggetti 3D da una libreri
 - **Ricerca intelligente**: digita parole chiave (es. "letto poliform") e trova modelli anche con nomi non esatti.
 - **Filtri a cascata**: Categoria → Sottocategoria → Marca.
 - **Thumbnail**: anteprime generate automaticamente da Rhino (opzionali, con fallback).
-- **Formati supportati**: .obj, .3dm, .3ds (se il plugin importer è installato in Rhino).
+- **Formati supportati**: .obj, .3dm, .3ds, .dwg. Lo stesso modello può comparire più volte, una per formato.
 - **Indicizzazione automatica**: il plugin scansiona la libreria e salva un indice JSON per caricamenti istantanei successivi.
 
-## Installazione
+## Installazione (questo PC o un altro computer)
 
-1. Copiare la cartella `RhinoLibraryPlugin` in un percorso noto (es. `C:\RhinoPlugins\`).
-2. In Rhino 8, aprire l'editor Python: `EditPythonScript`
-3. Eseguire:
-   ```python
-   import sys
-   sys.path.append(r"C:\RhinoPlugins")
-   from RhinoLibraryPlugin.plugin import OnLoadPlugIn
-   OnLoadPlugIn()
-   ```
-4. Il pannello "Libreria Interni" apparirà nei pannelli ancorabili (Panels → Libreria Interni).
+Serve **Rhino 7 o Rhino 8**: è lo stesso zip, senza pacchetti diversi. I modelli 3D non sono nel plugin: ogni PC sceglie la propria cartella libreria.
+
+1. Chiudi Rhino.
+2. Fai doppio clic su `Installa.bat` (nella cartella del plugin, oppure nello zip `LibreriaInterni-0.1.0.zip`).
+3. Riapri Rhino e digita il comando **`LibreriaInterni`**.
+4. Clicca **Scegli cartella** e indica la libreria 3D.
+
+Per disinstallare: chiudi Rhino e fai doppio clic su `Disinstalla.bat`.
+
+Per creare lo zip da mandare ad altri PC:
+
+```
+powershell -File RhinoLibraryPlugin\install\CreaPacchetto.ps1
+```
+
+Lo zip compare in `dist\LibreriaInterni-0.1.0.zip`.
 
 ## Configurazione
 
@@ -64,16 +70,16 @@ LibreriaInterni/
 
 ## Uso
 
-1. Imposta il percorso della libreria in `settings.json`.
-2. Apri il pannello "Libreria Interni" da Rhino.
+1. Apri Rhino e lancia `LibreriaInterni`.
+2. Se è la prima volta, scegli la cartella della libreria.
 3. Usa la barra di ricerca o i filtri a cascata per trovare un modello.
 4. Seleziona il modello e clicca **"Importa selezionato"**.
 5. Il modello viene inserito nel documento Rhino corrente.
 
 ## Note tecniche
 
-- Scritto in **Python 3** per Rhino 8 (compatibile con Rhino 7 se Python 3 è disponibile).
-- UI in **Eto.Forms** (toolkit nativo di Rhino, accessibile da Python tramite CLR).
+- Scritto in **IronPython 2** (il Python già incluso in Rhino 7 e 8), così si installa senza setup extra.
+- UI in **Eto.Forms** (finestra di Rhino, non ancora pannello ancorabile).
 - Generazione thumbnail tramite `RhinoDoc` temporaneo e `ViewCapture`.
 - Indice in **JSON** (`library.json`) con stale detection automatica.
 

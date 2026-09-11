@@ -1,4 +1,5 @@
 # coding: utf-8
+import os
 import clr
 clr.AddReference("Eto")
 
@@ -13,11 +14,38 @@ from services.thumbnail_manager import ThumbnailManager
 from services.import_manager import ImportManager
 from settings.plugin_settings import PluginSettings
 
+FORMAT_LABELS = {
+    ".3dm": "3DM",
+    ".obj": "OBJ",
+    ".3ds": "3DS",
+    ".dwg": "DWG",
+}
+LABEL_TO_FORMAT = {}
+for _fmt, _label in FORMAT_LABELS.items():
+    LABEL_TO_FORMAT[_label] = _fmt
+    LABEL_TO_FORMAT[_label.lower()] = _fmt
+    LABEL_TO_FORMAT[_fmt] = _fmt
+
 
 class LibraryPanel(forms.Panel):
+    # IronPython: i keyword extra sul costruttore di un controllo Eto/CLR falliscono.
+    _create_pose_mode = False
+
     def __init__(self):
+        pose_mode = LibraryPanel._create_pose_mode
+        LibraryPanel._create_pose_mode = False
         super(LibraryPanel, self).__init__()
-        self.settings = PluginSettings()
+        self.pose_mode = pose_mode
+        self.host_form = None
+        if pose_mode:
+            gimmemore_file = os.path.join(
+                PluginSettings.SETTINGS_DIR, "settings-gimmemore.json"
+            )
+            self.settings = PluginSettings(
+                settings_file=gimmemore_file, default_to_fixture=False
+            )
+        else:
+            self.settings = PluginSettings()
         self.lib_engine = LibreriaEngine()
         self.search_engine = SearchEngine()
         self.thumb_manager = ThumbnailManager(self.settings)
@@ -50,11 +78,16 @@ class LibraryPanel(forms.Panel):
         self.brand_dropdown.Enabled = False
         self.brand_dropdown.SelectedIndexChanged += self.on_filter_changed
 
+        self.format_dropdown = forms.DropDown()
+        self.format_dropdown.Enabled = False
+        self.format_dropdown.SelectedIndexChanged += self.on_filter_changed
+
         filter_layout = forms.DynamicLayout()
         filter_layout.BeginHorizontal()
         filter_layout.Add(self.category_dropdown, True)
         filter_layout.Add(self.sub_category_dropdown, True)
         filter_layout.Add(self.brand_dropdown, True)
+        filter_layout.Add(self.format_dropdown, True)
         filter_layout.EndHorizontal()
 
         self.results_list = forms.ListBox()
@@ -69,7 +102,7 @@ class LibraryPanel(forms.Panel):
         self.refresh_button.Text = "Aggiorna libreria"
 
         def on_refresh(s, e):
-            self.load_library()
+            self.load_library(force_rescan=True)
 
         self.refresh_button.Click += on_refresh
 
@@ -107,11 +140,14 @@ class LibraryPanel(forms.Panel):
             self.settings.save()
             self.load_library()
 
-    def load_library(self):
+    def load_library(self, force_rescan=False):
         self.status_label.Text = "Caricamento libreria..."
         root_path = self.settings.library_root_path
         if not root_path:
-            self.status_label.Text = "Seleziona la cartella libreria nelle impostazioni del plugin"
+            if self.pose_mode:
+                self.status_label.Text = "Scegli la cartella della libreria per iniziare."
+            else:
+                self.status_label.Text = "Seleziona la cartella libreria nelle impostazioni del plugin"
             return
 
         import os
@@ -119,7 +155,7 @@ class LibraryPanel(forms.Panel):
             self.status_label.Text = "Cartella libreria non trovata"
             return
 
-        index = self.lib_engine.load_index(root_path)
+        index = None if force_rescan else self.lib_engine.load_index(root_path)
         if index is None or self.lib_engine.is_index_stale(root_path, index.last_scanned):
             entries = self.lib_engine.scan_library(root_path)
             index = LibraryIndex(last_scanned=datetime.utcnow(), entries=entries)
@@ -144,8 +180,18 @@ class LibraryPanel(forms.Panel):
             self.sub_category_dropdown.Enabled = False
             self.brand_dropdown.Items.Clear()
             self.brand_dropdown.Enabled = False
+            self._fill_format_dropdown(self.all_entries)
         finally:
             self._updating_filters = False
+
+    def _fill_format_dropdown(self, entries, category=None, sub_category=None, brand=None):
+        formats = self.lib_engine.get_formats(entries, category, sub_category, brand)
+        self.format_dropdown.Items.Clear()
+        self.format_dropdown.Items.Add("Tutti i formati")
+        for fmt in formats:
+            self.format_dropdown.Items.Add(FORMAT_LABELS.get(fmt, fmt.lstrip(".").upper()))
+        self.format_dropdown.SelectedIndex = 0
+        self.format_dropdown.Enabled = True
 
     def _dropdown_text(self, dropdown):
         try:
@@ -172,11 +218,33 @@ class LibraryPanel(forms.Panel):
             return None
         return text
 
+    def _selected_format(self):
+        try:
+            idx = int(self.format_dropdown.SelectedIndex)
+        except Exception:
+            return None
+        if idx <= 0:
+            return None
+        value = self.format_dropdown.SelectedValue
+        if value is None:
+            return None
+        text = getattr(value, "Text", None)
+        if not text:
+            text = str(value)
+        text = str(text).strip()
+        if (not text) or text.startswith("Tutti "):
+            return None
+        mapped = LABEL_TO_FORMAT.get(text)
+        if mapped:
+            return mapped
+        return LABEL_TO_FORMAT.get(text.lower())
+
     def on_filter_changed(self, sender, e):
         if self._updating_filters:
             return
         selected_category = self._dropdown_text(self.category_dropdown)
         selected_sub = self._dropdown_text(self.sub_category_dropdown)
+        selected_brand = self._dropdown_text(self.brand_dropdown)
 
         if sender == self.category_dropdown:
             self._updating_filters = True
@@ -190,6 +258,7 @@ class LibraryPanel(forms.Panel):
                 self.sub_category_dropdown.Enabled = True
                 self.brand_dropdown.Items.Clear()
                 self.brand_dropdown.Enabled = False
+                self._fill_format_dropdown(self.all_entries, selected_category)
             finally:
                 self._updating_filters = False
         elif sender == self.sub_category_dropdown:
@@ -202,6 +271,15 @@ class LibraryPanel(forms.Panel):
                     self.brand_dropdown.Items.Add(brand)
                 self.brand_dropdown.SelectedIndex = 0
                 self.brand_dropdown.Enabled = True
+                self._fill_format_dropdown(self.all_entries, selected_category, selected_sub)
+            finally:
+                self._updating_filters = False
+        elif sender == self.brand_dropdown:
+            self._updating_filters = True
+            try:
+                self._fill_format_dropdown(
+                    self.all_entries, selected_category, selected_sub, selected_brand
+                )
             finally:
                 self._updating_filters = False
 
@@ -230,6 +308,10 @@ class LibraryPanel(forms.Panel):
             if brand:
                 pool = [e for e in pool if e.brand == brand]
 
+        fmt = self._selected_format()
+        if fmt:
+            pool = [e for e in pool if e.format == fmt]
+
         self.filtered_entries = pool
         self.results_list.Items.Clear()
         for entry in self.filtered_entries:
@@ -255,7 +337,10 @@ class LibraryPanel(forms.Panel):
         if idx < 0 or idx >= len(self.filtered_entries):
             return
         entry = self.filtered_entries[idx]
-        success = self.import_manager.import_model(entry.file_path)
+        if self.pose_mode:
+            success = self.import_manager.place_model(entry.file_path, self.host_form)
+        else:
+            success = self.import_manager.import_model(entry.file_path)
         if success:
             print("Importato: {0}".format(entry.model_name))
         else:

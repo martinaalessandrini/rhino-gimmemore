@@ -31,8 +31,41 @@ def _parse_iso(value):
 class LibreriaEngine(object):
     """Handles folder scanning, index persistence, and metadata extraction."""
 
-    SUPPORTED_FORMATS = set([".obj", ".3ds", ".3dm"])
+    SUPPORTED_FORMATS = set([".obj", ".3ds", ".3dm", ".dwg"])
     INDEX_FILENAME = "library.json"
+    SKIP_DIR_NAMES = set(["__macosx", "__pycache__"])
+
+    def _should_skip_dir(self, name):
+        lowered = name.lower()
+        if lowered in self.SKIP_DIR_NAMES:
+            return True
+        if name.startswith("."):
+            return True
+        return False
+
+    def _collect_models_under_brand(self, brand_dir, category, sub_category, brand, entries):
+        for dirpath, dirnames, filenames in os.walk(brand_dir):
+            dirnames[:] = [d for d in dirnames if not self._should_skip_dir(d)]
+            for name in filenames:
+                if name.startswith(".") or name.startswith("._"):
+                    continue
+                ext = os.path.splitext(name)[1].lower()
+                if ext not in self.SUPPORTED_FORMATS:
+                    continue
+                file_path = os.path.join(dirpath, name)
+                if not os.path.isfile(file_path):
+                    continue
+                model_name = os.path.splitext(name)[0]
+                thumb_path = os.path.join(dirpath, model_name + ".thumb.png")
+                entries.append(ModelEntry(
+                    file_path=file_path,
+                    category=category,
+                    sub_category=sub_category,
+                    brand=brand,
+                    model_name=model_name,
+                    format=ext,
+                    thumbnail_path=thumb_path if os.path.exists(thumb_path) else None
+                ))
 
     def scan_library(self, root_path):
         entries = []
@@ -43,32 +76,23 @@ class LibreriaEngine(object):
             category_dir = os.path.join(root_path, category)
             if not os.path.isdir(category_dir):
                 continue
+            if self._should_skip_dir(category):
+                continue
             for sub_category in os.listdir(category_dir):
                 sub_dir = os.path.join(category_dir, sub_category)
                 if not os.path.isdir(sub_dir):
+                    continue
+                if self._should_skip_dir(sub_category):
                     continue
                 for brand in os.listdir(sub_dir):
                     brand_dir = os.path.join(sub_dir, brand)
                     if not os.path.isdir(brand_dir):
                         continue
-                    for name in os.listdir(brand_dir):
-                        file_path = os.path.join(brand_dir, name)
-                        if not os.path.isfile(file_path):
-                            continue
-                        ext = os.path.splitext(name)[1].lower()
-                        if ext not in self.SUPPORTED_FORMATS:
-                            continue
-                        model_name = os.path.splitext(name)[0]
-                        thumb_path = os.path.join(brand_dir, model_name + ".thumb.png")
-                        entries.append(ModelEntry(
-                            file_path=file_path,
-                            category=category,
-                            sub_category=sub_category,
-                            brand=brand,
-                            model_name=model_name,
-                            format=ext,
-                            thumbnail_path=thumb_path if os.path.exists(thumb_path) else None
-                        ))
+                    if self._should_skip_dir(brand):
+                        continue
+                    self._collect_models_under_brand(
+                        brand_dir, category, sub_category, brand, entries
+                    )
         return entries
 
     def save_index(self, root_path, index):
@@ -146,3 +170,18 @@ class LibreriaEngine(object):
             e.brand for e in entries
             if e.category == category and e.sub_category == sub_category
         ]))
+
+    def get_formats(self, entries, category=None, sub_category=None, brand=None):
+        found = set()
+        for entry in entries:
+            if category and entry.category != category:
+                continue
+            if sub_category and entry.sub_category != sub_category:
+                continue
+            if brand and entry.brand != brand:
+                continue
+            found.add(entry.format)
+        preferred = [".3dm", ".obj", ".3ds", ".dwg"]
+        result = [fmt for fmt in preferred if fmt in found]
+        extras = sorted([fmt for fmt in found if fmt not in preferred])
+        return result + extras
