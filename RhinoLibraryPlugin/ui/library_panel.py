@@ -13,6 +13,7 @@ from core.library_index import LibraryIndex
 from services.thumbnail_manager import ThumbnailManager
 from services.import_manager import ImportManager
 from settings.plugin_settings import PluginSettings
+from core.result_row import result_row_fields
 
 FORMAT_LABELS = {
     ".3dm": "3DM",
@@ -90,8 +91,31 @@ class LibraryPanel(forms.Panel):
         filter_layout.Add(self.format_dropdown, True)
         filter_layout.EndHorizontal()
 
-        self.results_list = forms.ListBox()
-        self.results_list.SelectedIndexChanged += self.on_selection_changed
+        self.results_grid = forms.GridView()
+        self.results_grid.ShowHeader = True
+        self.results_grid.AllowMultipleSelection = False
+        self.results_grid.SelectionChanged += self.on_selection_changed
+
+        col_name = forms.GridColumn()
+        col_name.HeaderText = "Modello"
+        col_name.DataCell = forms.TextBoxCell(0)
+        col_name.Editable = False
+        col_name.Expand = True
+        self.results_grid.Columns.Add(col_name)
+
+        col_brand = forms.GridColumn()
+        col_brand.HeaderText = "Marca"
+        col_brand.DataCell = forms.TextBoxCell(1)
+        col_brand.Editable = False
+        col_brand.Width = 120
+        self.results_grid.Columns.Add(col_brand)
+
+        col_format = forms.GridColumn()
+        col_format.HeaderText = "Formato"
+        col_format.DataCell = forms.TextBoxCell(2)
+        col_format.Editable = False
+        col_format.Width = 72
+        self.results_grid.Columns.Add(col_format)
 
         self.import_button = forms.Button()
         self.import_button.Text = "Importa selezionato"
@@ -122,7 +146,7 @@ class LibraryPanel(forms.Panel):
         main_layout.BeginVertical()
         main_layout.Add(self.search_box, True, False)
         main_layout.Add(filter_layout, True, False)
-        main_layout.Add(self.results_list, True, True)
+        main_layout.Add(self.results_grid, True, True)
         main_layout.Add(button_layout, True, False)
         main_layout.Add(self.status_label, True, False)
         main_layout.EndVertical()
@@ -313,11 +337,11 @@ class LibraryPanel(forms.Panel):
             pool = [e for e in pool if e.format == fmt]
 
         self.filtered_entries = pool
-        self.results_list.Items.Clear()
+        rows = []
         for entry in self.filtered_entries:
-            self.results_list.Items.Add(
-                "{0}  -  {1}  ({2})".format(entry.model_name, entry.brand, entry.format)
-            )
+            rows.append(result_row_fields(entry.model_name, entry.brand, entry.format))
+        self.results_grid.DataStore = rows
+        self.import_button.Enabled = False
 
         if not self.all_entries:
             self.status_label.Text = "Nessun oggetto in libreria"
@@ -329,11 +353,17 @@ class LibraryPanel(forms.Panel):
                 self.settings.library_root_path
             )
 
+    def _selected_row_index(self):
+        try:
+            return int(self.results_grid.SelectedRow)
+        except Exception:
+            return -1
+
     def on_selection_changed(self, sender, e):
-        self.import_button.Enabled = self.results_list.SelectedIndex >= 0
+        self.import_button.Enabled = self._selected_row_index() >= 0
 
     def on_import_clicked(self, sender, e):
-        idx = self.results_list.SelectedIndex
+        idx = self._selected_row_index()
         if idx < 0 or idx >= len(self.filtered_entries):
             return
         entry = self.filtered_entries[idx]
