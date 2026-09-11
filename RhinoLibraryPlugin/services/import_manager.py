@@ -1,6 +1,6 @@
 import os
 
-from core.pose import translation_for_pose
+from core.pose import scale_origin_for_pose, translation_for_pose
 
 
 class ImportManager(object):
@@ -56,7 +56,7 @@ class ImportManager(object):
         return bbox
 
     def place_model(self, file_path, host_form=None):
-        """Importa e chiede un click XY; il fondo del volume va a Z=0. Esc cancella."""
+        """Importa, posa al click, poi Scala nativa. Esc (posa o scala) cancella."""
         if not self.can_import(file_path):
             return False
         try:
@@ -154,6 +154,12 @@ class ImportManager(object):
                 doc.Objects.Transform(obj_id, xform, True)
                 doc.Objects.Show(obj_id, True)
             doc.Views.Redraw()
+
+            if not self._run_native_scale(doc, new_ids, pt.X, pt.Y):
+                self._delete_ids(doc, new_ids)
+                doc.Views.Redraw()
+                return False
+
             placed = True
             return True
         except Exception:
@@ -164,6 +170,51 @@ class ImportManager(object):
             except Exception:
                 pass
             return False
+
+    def _xyz_literal(self, x, y, z):
+        def token(value):
+            text = ("%0.12f" % float(value)).rstrip("0").rstrip(".")
+            if text in ("-0", ""):
+                text = "0"
+            return text.replace(",", ".")
+
+        return "{0},{1},{2}".format(token(x), token(y), token(z))
+
+    def _run_native_scale(self, doc, new_ids, click_x, click_y):
+        import Rhino
+
+        origin = scale_origin_for_pose(click_x, click_y)
+        doc.Objects.UnselectAll()
+        selected = 0
+        for obj_id in new_ids:
+            try:
+                if doc.Objects.Select(obj_id, True):
+                    selected += 1
+            except Exception:
+                obj = doc.Objects.FindId(obj_id)
+                if obj is not None:
+                    obj.Select(True)
+                    selected += 1
+        if selected == 0:
+            return False
+        doc.Views.Redraw()
+        try:
+            Rhino.RhinoApp.SetFocusToMainWindow()
+        except Exception:
+            pass
+
+        script = "_-Scale {0}".format(self._xyz_literal(origin[0], origin[1], origin[2]))
+        ok = Rhino.RhinoApp.RunScript(script, True)
+        if not ok:
+            return False
+        try:
+            last = Rhino.Commands.Command.LastCommandResult
+            if last != Rhino.Commands.Result.Success:
+                return False
+        except Exception:
+            pass
+        doc.Objects.UnselectAll()
+        return True
 
     def _light_curve_preview(self, objects, rg):
         """Curve 2D solo se sono poche; altrimenti None e si usa il solo ingombro."""

@@ -5,7 +5,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.pose import translation_for_pose
+from core.pose import scale_origin_for_pose, translation_for_pose
 
 
 class PoseTranslationTests(unittest.TestCase):
@@ -26,3 +26,6 @@ class PoseTranslationTests(unittest.TestCase):
             click_x=0, click_y=0,
         )
         self.assertEqual((dx, dy, dz), (0, 0, 4))
+
+    def test_scale_origin_is_click_xy_and_drawing_zero(self):
+        self.assertEqual(scale_origin_for_pose(100, 200), (100.0, 200.0, 0.0))
