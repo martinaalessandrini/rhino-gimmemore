@@ -28,6 +28,10 @@ _Avoid_: quota del click, origine del file in X e Y, centro vista
 Il punto più basso del pezzo 3D (estremo inferiore del volume). In posa quel fondo sta a quota 0 del disegno, anche se nel file i piedi non erano a Z=0.
 _Avoid_: Z=0 del file, zero di appoggio del file, piano a cui si è cliccato
 
+**Assi OBJ**:
+In GimmeMore, un OBJ 3D viene ruotato così l’asse alto del file (di solito Y) diventa lo Z di Rhino. Una pianta 2D fatta solo di curve non viene ruotata. LibreriaInterni importa il file così com’è.
+_Avoid_: MapYtoZ, Y-up, conversione assi come nome in interfaccia
+
 **Fattore di scala**:
 Dopo che il pezzo è comparso, Rhino avvia Scala da solo (origine = punto di inserimento). Si digita il numero nella riga di comando (1 = dimensione del file; 0.01 = un centesimo) e si vede l’anteprima nel disegno.
 _Avoid_: misura in metri, interruttore mm/cm/m, campo scala nella finestra

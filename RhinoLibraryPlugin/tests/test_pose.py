@@ -5,7 +5,12 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.pose import scale_origin_for_pose, translation_for_pose
+from core.pose import (
+    map_obj_point_to_rhino,
+    scale_origin_for_pose,
+    should_align_obj_up_axis,
+    translation_for_pose,
+)
 
 
 class PoseTranslationTests(unittest.TestCase):
@@ -29,3 +34,14 @@ class PoseTranslationTests(unittest.TestCase):
 
     def test_scale_origin_is_click_xy_and_drawing_zero(self):
         self.assertEqual(scale_origin_for_pose(100, 200), (100.0, 200.0, 0.0))
+
+    def test_obj_height_along_y_becomes_rhino_z(self):
+        self.assertEqual(map_obj_point_to_rhino(0, 10, 0), (0.0, 0.0, 10.0))
+
+    def test_obj_x_stays_x_and_obj_z_becomes_negative_y(self):
+        self.assertEqual(map_obj_point_to_rhino(3, 0, 5), (3.0, -5.0, 0.0))
+
+    def test_only_3d_obj_is_aligned_to_rhino_z(self):
+        self.assertTrue(should_align_obj_up_axis(".obj", curve_only=False))
+        self.assertFalse(should_align_obj_up_axis(".obj", curve_only=True))
+        self.assertFalse(should_align_obj_up_axis(".3dm", curve_only=False))

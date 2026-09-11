@@ -1,6 +1,10 @@
 import os
 
-from core.pose import scale_origin_for_pose, translation_for_pose
+from core.pose import (
+    scale_origin_for_pose,
+    should_align_obj_up_axis,
+    translation_for_pose,
+)
 
 
 class ImportManager(object):
@@ -86,13 +90,33 @@ class ImportManager(object):
             if not new_objs:
                 return False
 
+            import Rhino.Geometry as rg
+            from Rhino.Geometry import Point3d, Vector3d
+            from System.Drawing import Color
+            import math
+
+            ext = os.path.splitext(file_path)[1].lower()
+            curve_preview = self._light_curve_preview(new_objs, rg)
+            if should_align_obj_up_axis(ext, curve_preview is not None):
+                rot = Transform.Rotation(math.pi / 2.0, Vector3d.XAxis, Point3d.Origin)
+                for obj in new_objs:
+                    doc.Objects.Transform(obj.Id, rot, True)
+                refreshed = []
+                for obj in new_objs:
+                    found = doc.Objects.FindId(obj.Id)
+                    if found is None:
+                        found = doc.Objects.Find(obj.Id)
+                    if found is not None:
+                        refreshed.append(found)
+                if not refreshed:
+                    self._delete_ids(doc, [o.Id for o in new_objs])
+                    return False
+                new_objs = refreshed
+
             bbox = self._combined_bbox(new_objs)
             if bbox is None or not bbox.IsValid:
                 self._delete_ids(doc, [o.Id for o in new_objs])
                 return False
-
-            import Rhino.Geometry as rg
-            from System.Drawing import Color
 
             preview_curves = self._light_curve_preview(new_objs, rg)
             preview_color = Color.FromArgb(255, 0, 140, 220)
