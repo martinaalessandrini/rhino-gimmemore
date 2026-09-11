@@ -15,8 +15,8 @@ _gimmemore_form = None
 
 
 def _setup_host_form(form):
-    form.ClientSize = drawing.Size(560, 380)
-    form.MinimumSize = drawing.Size(420, 260)
+    form.ClientSize = drawing.Size(720, 400)
+    form.MinimumSize = drawing.Size(560, 280)
     form.Padding = drawing.Padding(6)
     form.Resizable = True
     form.Maximizable = True

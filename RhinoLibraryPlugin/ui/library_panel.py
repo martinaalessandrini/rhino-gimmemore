@@ -13,7 +13,7 @@ from core.library_index import LibraryIndex
 from services.thumbnail_manager import ThumbnailManager
 from services.import_manager import ImportManager
 from settings.plugin_settings import PluginSettings
-from core.result_row import result_row_fields
+from core.result_row import ellipsize_label, result_row_fields
 
 FORMAT_LABELS = {
     ".3dm": "3DM",
@@ -54,9 +54,14 @@ class LibraryPanel(forms.Panel):
         self.all_entries = []
         self.filtered_entries = []
         self._updating_filters = False
+        self._syncing_columns = False
+        self._header_labels = []
+        self._filter_dropdowns = []
+        self._col_pixel_width = 120
 
         self.build_layout()
         self.load_library()
+        self._sync_columns()
 
     def build_layout(self):
         self.search_box = forms.TextBox()
@@ -79,43 +84,85 @@ class LibraryPanel(forms.Panel):
         self.brand_dropdown.Enabled = False
         self.brand_dropdown.SelectedIndexChanged += self.on_filter_changed
 
+        self.model_dropdown = forms.DropDown()
+        self.model_dropdown.Enabled = False
+        self.model_dropdown.SelectedIndexChanged += self.on_filter_changed
+
         self.format_dropdown = forms.DropDown()
         self.format_dropdown.Enabled = False
         self.format_dropdown.SelectedIndexChanged += self.on_filter_changed
 
-        filter_layout = forms.DynamicLayout()
-        filter_layout.BeginHorizontal()
-        filter_layout.Add(self.category_dropdown, True)
-        filter_layout.Add(self.sub_category_dropdown, True)
-        filter_layout.Add(self.brand_dropdown, True)
-        filter_layout.Add(self.format_dropdown, True)
-        filter_layout.EndHorizontal()
+        titles = ("Categoria", "Tipo", "Marca", "Modello", "Formato")
+        self._filter_dropdowns = [
+            self.category_dropdown,
+            self.sub_category_dropdown,
+            self.brand_dropdown,
+            self.model_dropdown,
+            self.format_dropdown,
+        ]
+        self._header_labels = []
+        for title in titles:
+            lab = forms.Label()
+            lab.Text = title
+            try:
+                lab.Wrap = forms.WrapMode.None
+            except Exception:
+                pass
+            self._header_labels.append(lab)
+
+        columns_table = forms.TableLayout()
+        columns_table.Spacing = drawing.Size(0, 4)
+        columns_table.Padding = drawing.Padding(0)
+
+        def equal_cell(control):
+            cell = forms.TableCell(control)
+            cell.ScaleWidth = True
+            return cell
+
+        def gutter_cell():
+            spacer = forms.Panel()
+            spacer.Width = 20
+            cell = forms.TableCell(spacer)
+            cell.ScaleWidth = False
+            return cell
+
+        header_row = forms.TableRow()
+        for lab in self._header_labels:
+            header_row.Cells.Add(equal_cell(lab))
+        header_row.Cells.Add(gutter_cell())
+
+        filter_row = forms.TableRow()
+        for drop in self._filter_dropdowns:
+            filter_row.Cells.Add(equal_cell(drop))
+        filter_row.Cells.Add(gutter_cell())
+
+        columns_table.Rows.Add(header_row)
+        columns_table.Rows.Add(filter_row)
 
         self.results_grid = forms.GridView()
         self.results_grid.ShowHeader = True
         self.results_grid.AllowMultipleSelection = False
         self.results_grid.SelectionChanged += self.on_selection_changed
+        self.results_grid.SizeChanged += self._sync_columns
+        try:
+            self.results_grid.AllowColumnReordering = False
+        except Exception:
+            pass
 
-        col_name = forms.GridColumn()
-        col_name.HeaderText = "Modello"
-        col_name.DataCell = forms.TextBoxCell(0)
-        col_name.Editable = False
-        col_name.Expand = True
-        self.results_grid.Columns.Add(col_name)
+        for index, header in enumerate(titles):
+            col = forms.GridColumn()
+            col.HeaderText = header
+            col.DataCell = forms.TextBoxCell(index)
+            col.Editable = False
+            col.Expand = False
+            col.Width = 100
+            try:
+                col.Resizable = False
+            except Exception:
+                pass
+            self.results_grid.Columns.Add(col)
 
-        col_brand = forms.GridColumn()
-        col_brand.HeaderText = "Marca"
-        col_brand.DataCell = forms.TextBoxCell(1)
-        col_brand.Editable = False
-        col_brand.Width = 120
-        self.results_grid.Columns.Add(col_brand)
-
-        col_format = forms.GridColumn()
-        col_format.HeaderText = "Formato"
-        col_format.DataCell = forms.TextBoxCell(2)
-        col_format.Editable = False
-        col_format.Width = 72
-        self.results_grid.Columns.Add(col_format)
+        self.SizeChanged += self._sync_columns
 
         self.import_button = forms.Button()
         self.import_button.Text = "Importa selezionato"
@@ -145,13 +192,61 @@ class LibraryPanel(forms.Panel):
         main_layout.Spacing = drawing.Size(4, 4)
         main_layout.BeginVertical()
         main_layout.Add(self.search_box, True, False)
-        main_layout.Add(filter_layout, True, False)
+        main_layout.Add(columns_table, True, False)
         main_layout.Add(self.results_grid, True, True)
         main_layout.Add(button_layout, True, False)
         main_layout.Add(self.status_label, True, False)
         main_layout.EndVertical()
 
         self.Content = main_layout
+
+    def _fill_grid_rows(self):
+        width = getattr(self, "_col_pixel_width", 120)
+        rows = []
+        for entry in self.filtered_entries:
+            fields = result_row_fields(
+                entry.category, entry.sub_category, entry.brand, entry.model_name, entry.format
+            )
+            rows.append(tuple(ellipsize_label(part, width) for part in fields))
+        self.results_grid.DataStore = rows
+
+    def _sync_columns(self, sender=None, e=None):
+        if self._syncing_columns:
+            return
+        grid = getattr(self, "results_grid", None)
+        if grid is None:
+            return
+        try:
+            n = int(grid.Columns.Count)
+        except Exception:
+            try:
+                n = len(list(grid.Columns))
+            except Exception:
+                n = 0
+        if n < 5:
+            return
+        self._syncing_columns = True
+        try:
+            total = int(grid.Width or 0)
+            count = 5
+            if total > 80:
+                gutter = 20
+                inner = total - gutter
+                if inner < count * 48:
+                    inner = count * 48
+                col_w = int(inner / count)
+                leftover = inner - (col_w * count)
+                for i in range(count):
+                    w = col_w
+                    if i == count - 1:
+                        w += leftover
+                    col = grid.Columns[i]
+                    col.Expand = False
+                    col.Width = w
+                self._col_pixel_width = col_w
+            self._fill_grid_rows()
+        finally:
+            self._syncing_columns = False
 
     def on_choose_folder(self, sender, e):
         dialog = forms.SelectFolderDialog()
@@ -204,12 +299,25 @@ class LibraryPanel(forms.Panel):
             self.sub_category_dropdown.Enabled = False
             self.brand_dropdown.Items.Clear()
             self.brand_dropdown.Enabled = False
+            self.model_dropdown.Items.Clear()
+            self.model_dropdown.Enabled = False
             self._fill_format_dropdown(self.all_entries)
         finally:
             self._updating_filters = False
 
-    def _fill_format_dropdown(self, entries, category=None, sub_category=None, brand=None):
-        formats = self.lib_engine.get_formats(entries, category, sub_category, brand)
+    def _fill_model_dropdown(self, entries, category, sub_category, brand):
+        models = self.lib_engine.get_models(entries, category or "", sub_category or "", brand or "")
+        self.model_dropdown.Items.Clear()
+        self.model_dropdown.Items.Add("Tutti i modelli")
+        for name in models:
+            self.model_dropdown.Items.Add(name)
+        self.model_dropdown.SelectedIndex = 0
+        self.model_dropdown.Enabled = True
+
+    def _fill_format_dropdown(self, entries, category=None, sub_category=None, brand=None, model_name=None):
+        formats = self.lib_engine.get_formats(
+            entries, category, sub_category, brand, model_name
+        )
         self.format_dropdown.Items.Clear()
         self.format_dropdown.Items.Add("Tutti i formati")
         for fmt in formats:
@@ -231,13 +339,14 @@ class LibraryPanel(forms.Panel):
         if not text:
             text = str(value)
         text = str(text).strip()
-        if (not text) or text.startswith("Tutte "):
+        if (not text) or text.startswith("Tutte ") or text.startswith("Tutti "):
             return None
         known = set()
         for entry in self.all_entries:
             known.add(entry.category)
             known.add(entry.sub_category)
             known.add(entry.brand)
+            known.add(entry.model_name)
         if text not in known:
             return None
         return text
@@ -269,19 +378,22 @@ class LibraryPanel(forms.Panel):
         selected_category = self._dropdown_text(self.category_dropdown)
         selected_sub = self._dropdown_text(self.sub_category_dropdown)
         selected_brand = self._dropdown_text(self.brand_dropdown)
+        selected_model = self._dropdown_text(self.model_dropdown)
 
         if sender == self.category_dropdown:
             self._updating_filters = True
             try:
                 sub_categories = self.lib_engine.get_sub_categories(self.all_entries, selected_category or "")
                 self.sub_category_dropdown.Items.Clear()
-                self.sub_category_dropdown.Items.Add("Tutte le sottocategorie")
+                self.sub_category_dropdown.Items.Add("Tutti i tipi")
                 for sub in sub_categories:
                     self.sub_category_dropdown.Items.Add(sub)
                 self.sub_category_dropdown.SelectedIndex = 0
                 self.sub_category_dropdown.Enabled = True
                 self.brand_dropdown.Items.Clear()
                 self.brand_dropdown.Enabled = False
+                self.model_dropdown.Items.Clear()
+                self.model_dropdown.Enabled = False
                 self._fill_format_dropdown(self.all_entries, selected_category)
             finally:
                 self._updating_filters = False
@@ -295,14 +407,31 @@ class LibraryPanel(forms.Panel):
                     self.brand_dropdown.Items.Add(brand)
                 self.brand_dropdown.SelectedIndex = 0
                 self.brand_dropdown.Enabled = True
+                self.model_dropdown.Items.Clear()
+                self.model_dropdown.Enabled = False
                 self._fill_format_dropdown(self.all_entries, selected_category, selected_sub)
             finally:
                 self._updating_filters = False
         elif sender == self.brand_dropdown:
             self._updating_filters = True
             try:
+                self._fill_model_dropdown(
+                    self.all_entries, selected_category, selected_sub, selected_brand
+                )
                 self._fill_format_dropdown(
                     self.all_entries, selected_category, selected_sub, selected_brand
+                )
+            finally:
+                self._updating_filters = False
+        elif sender == self.model_dropdown:
+            self._updating_filters = True
+            try:
+                self._fill_format_dropdown(
+                    self.all_entries,
+                    selected_category,
+                    selected_sub,
+                    selected_brand,
+                    selected_model,
                 )
             finally:
                 self._updating_filters = False
@@ -331,17 +460,24 @@ class LibraryPanel(forms.Panel):
             brand = self._dropdown_text(self.brand_dropdown)
             if brand:
                 pool = [e for e in pool if e.brand == brand]
+            model = self._dropdown_text(self.model_dropdown)
+            if model:
+                pool = [e for e in pool if e.model_name == model]
 
         fmt = self._selected_format()
         if fmt:
             pool = [e for e in pool if e.format == fmt]
 
         self.filtered_entries = pool
-        rows = []
-        for entry in self.filtered_entries:
-            rows.append(result_row_fields(entry.model_name, entry.brand, entry.format))
-        self.results_grid.DataStore = rows
         self.import_button.Enabled = False
+        for drop in self._filter_dropdowns:
+            try:
+                value = drop.SelectedValue
+                tip = getattr(value, "Text", None) or str(value or "")
+                drop.ToolTip = str(tip).strip()
+            except Exception:
+                pass
+        self._sync_columns()
 
         if not self.all_entries:
             self.status_label.Text = "Nessun oggetto in libreria"

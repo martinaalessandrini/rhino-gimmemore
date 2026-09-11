@@ -40,6 +40,14 @@ _Avoid_: misura in metri, interruttore mm/cm/m, campo scala nella finestra
 Qualunque cartella sul computer, scelta con Scegli cartella. Il nome della cartella non conta. Al primo avvio di GimmeMore la lista è vuota e c’è l’istruzione di sceglierla; dopo GimmeMore riapre l’ultima cartella scelta qui, senza toccare quella di LibreriaInterni.
 _Avoid_: path unico condiviso obbligatorio, Documents\LibreriaInterni come unica sede
 
+**Tipo**:
+La famiglia di oggetto (Letti, Comodini, …), letta dalla cartella e ripulita se il nome è numerato (es. `01_LETTI`). Compara nella colonna Tipo, sotto il filtro Tipo.
+_Avoid_: sottocategoria come etichetta in interfaccia
+
+**Marca**:
+Il marchio, letto dalla cartella; se il nome file inizia con lo stesso marchio (`LAGO_…`, `POLIFORM_…_3D`) quella parte non si ripete nel modello.
+_Avoid_: brand in inglese in interfaccia
+
 **Voce**:
 Una riga della lista: un file su disco (stesso prodotto in .obj e .3dm = due voci).
-_Avoid_: modello (ambiguo), oggetto, pezzo come identità in libreria
+_Avoid_: oggetto, pezzo come identità in libreria

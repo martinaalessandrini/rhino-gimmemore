@@ -73,7 +73,7 @@ class LibreriaEngineTests(unittest.TestCase):
 
         self.assertIn("LAGO", brands)
         self.assertIn("Pianca", brands)
-        self.assertIn("LAGO_WEB_FLUVU", names)
+        self.assertIn("WEB_FLUVU", names)
         self.assertIn("WBCB13C", names)
         self.assertNotIn("._Opera", names)
 
@@ -103,6 +103,10 @@ class LibreriaEngineTests(unittest.TestCase):
         self.assertEqual(
             self.engine.get_formats(entries, "Arredi", "Letti", "Poliform"),
             [".obj"],
+        )
+        self.assertEqual(
+            self.engine.get_models(entries, "Arredi", "Letti", "Twils"),
+            ["Opera"],
         )
 
 

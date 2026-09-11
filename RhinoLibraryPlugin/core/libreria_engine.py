@@ -4,6 +4,7 @@ from datetime import datetime
 
 from core.model_entry import ModelEntry
 from core.library_index import LibraryIndex
+from core.metadata import infer_metadata
 
 
 def _open_text(path, mode):
@@ -57,12 +58,15 @@ class LibreriaEngine(object):
                     continue
                 model_name = os.path.splitext(name)[0]
                 thumb_path = os.path.join(dirpath, model_name + ".thumb.png")
+                category_out, tipo, brand_out, model_out = infer_metadata(
+                    [category, sub_category, brand], name
+                )
                 entries.append(ModelEntry(
                     file_path=file_path,
-                    category=category,
-                    sub_category=sub_category,
-                    brand=brand,
-                    model_name=model_name,
+                    category=category_out or category,
+                    sub_category=tipo or sub_category,
+                    brand=brand_out or brand,
+                    model_name=model_out or model_name,
                     format=ext,
                     thumbnail_path=thumb_path if os.path.exists(thumb_path) else None
                 ))
@@ -130,12 +134,25 @@ class LibreriaEngine(object):
                 f.close()
             entries = []
             for e in data.get("entries", []):
+                file_path = e["filePath"]
+                try:
+                    rel_dir = os.path.dirname(os.path.relpath(file_path, root_path))
+                except Exception:
+                    rel_dir = ""
+                if rel_dir in (".", ""):
+                    parts = [e.get("category"), e.get("subCategory"), e.get("brand")]
+                else:
+                    parts = rel_dir.split(os.sep)[:3]
+                category, tipo, brand, model = infer_metadata(
+                    parts,
+                    os.path.basename(file_path),
+                )
                 entries.append(ModelEntry(
-                    file_path=e["filePath"],
-                    category=e["category"],
-                    sub_category=e["subCategory"],
-                    brand=e["brand"],
-                    model_name=e["modelName"],
+                    file_path=file_path,
+                    category=category or e["category"],
+                    sub_category=tipo or e["subCategory"],
+                    brand=brand or e["brand"],
+                    model_name=model or e["modelName"],
                     format=e["format"],
                     thumbnail_path=e.get("thumbnailPath")
                 ))
@@ -171,7 +188,13 @@ class LibreriaEngine(object):
             if e.category == category and e.sub_category == sub_category
         ]))
 
-    def get_formats(self, entries, category=None, sub_category=None, brand=None):
+    def get_models(self, entries, category, sub_category, brand):
+        return sorted(set([
+            e.model_name for e in entries
+            if e.category == category and e.sub_category == sub_category and e.brand == brand
+        ]))
+
+    def get_formats(self, entries, category=None, sub_category=None, brand=None, model_name=None):
         found = set()
         for entry in entries:
             if category and entry.category != category:
@@ -179,6 +202,8 @@ class LibreriaEngine(object):
             if sub_category and entry.sub_category != sub_category:
                 continue
             if brand and entry.brand != brand:
+                continue
+            if model_name and entry.model_name != model_name:
                 continue
             found.add(entry.format)
         preferred = [".3dm", ".obj", ".3ds", ".dwg"]
